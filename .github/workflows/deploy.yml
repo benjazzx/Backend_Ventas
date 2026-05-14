@@ -27,8 +27,10 @@ jobs:
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/back-ventas:latest
 
       - name: Preparar clave SSH
+        env:
+          SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
         run: |
-          echo "${{ secrets.EC2_SSH_KEY }}" | base64 -d > /tmp/ssh_key
+          printf '%s' "$SSH_KEY" > /tmp/ssh_key
           chmod 600 /tmp/ssh_key
 
       - name: Despliegue en EC2

@@ -26,32 +26,33 @@ jobs:
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/back-ventas:latest
 
-      - name: Preparar clave SSH
+      - name: Despliegue en EC2
         env:
           SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_PROXY: ${{ secrets.EC2_PROXY_HOST }}
+          DOCKER_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          DB_ENDPOINT: ${{ secrets.DB_ENDPOINT }}
+          DB_USERNAME: ${{ secrets.DB_USERNAME }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
         run: |
-          printf '%s' "$SSH_KEY" > /tmp/ssh_key
+          echo "$SSH_KEY" > /tmp/ssh_key
           chmod 600 /tmp/ssh_key
-
-      - name: Despliegue en EC2
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key_path: /tmp/ssh_key
-          proxy_host: ${{ secrets.EC2_PROXY_HOST }}
-          proxy_username: ${{ secrets.EC2_USER }}
-          proxy_key_path: /tmp/ssh_key
-          script: |
-            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/back-ventas:latest
+          ssh -i /tmp/ssh_key \
+            -o StrictHostKeyChecking=no \
+            -o ProxyCommand="ssh -i /tmp/ssh_key -o StrictHostKeyChecking=no -W %h:%p ${EC2_USER}@${EC2_PROXY}" \
+            ${EC2_USER}@${EC2_HOST} "
+            docker pull ${DOCKER_USER}/back-ventas:latest || true
             docker stop back-ventas || true
             docker rm back-ventas || true
             docker run -d \
               --name back-ventas \
               -p 8080:8080 \
-              -e DB_ENDPOINT=${{ secrets.DB_ENDPOINT }} \
+              -e DB_ENDPOINT=${DB_ENDPOINT} \
               -e DB_PORT=3306 \
               -e DB_NAME=ventas_db \
-              -e DB_USERNAME=${{ secrets.DB_USERNAME }} \
-              -e DB_PASSWORD=${{ secrets.DB_PASSWORD }} \
-              ${{ secrets.DOCKERHUB_USERNAME }}/back-ventas:latest
+              -e DB_USERNAME=${DB_USERNAME} \
+              -e DB_PASSWORD=${DB_PASSWORD} \
+              ${DOCKER_USER}/back-ventas:latest
+          "

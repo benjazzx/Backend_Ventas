@@ -28,7 +28,7 @@ jobs:
 
       - name: Preparar clave SSH
         run: |
-          echo "${{ secrets.EC2_SSH_KEY }}" > /tmp/ssh_key
+          echo "${{ secrets.EC2_SSH_KEY }}" | base64 -d > /tmp/ssh_key
           chmod 600 /tmp/ssh_key
 
       - name: Despliegue en EC2

@@ -1,0 +1,50 @@
+name: CI/CD Pipeline - Back Ventas
+
+on:
+  push:
+    branches:
+      - deploy
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repositorio
+        uses: actions/checkout@v4
+
+      - name: Login a Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build y Push imagen Docker
+        uses: docker/build-push-action@v5
+        with:
+          context: ./Springboot-API-REST
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/back-ventas:latest
+
+      - name: Despliegue en EC2
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          proxy_host: ${{ secrets.EC2_PROXY_HOST }}
+          proxy_username: ${{ secrets.EC2_USER }}
+          proxy_key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/back-ventas:latest
+            docker stop back-ventas || true
+            docker rm back-ventas || true
+            docker run -d \
+              --name back-ventas \
+              -p 8080:8080 \
+              -e DB_ENDPOINT=${{ secrets.DB_ENDPOINT }} \
+              -e DB_PORT=3306 \
+              -e DB_NAME=ventas_db \
+              -e DB_USERNAME=${{ secrets.DB_USERNAME }} \
+              -e DB_PASSWORD=${{ secrets.DB_PASSWORD }} \
+              ${{ secrets.DOCKERHUB_USERNAME }}/back-ventas:latest

@@ -27,23 +27,21 @@ jobs:
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/back-ventas:latest
 
       - name: Despliegue en EC2
-        env:
-          SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USER: ${{ secrets.EC2_USER }}
-          EC2_PROXY: ${{ secrets.EC2_PROXY_HOST }}
-          DOCKER_USER: ${{ secrets.DOCKERHUB_USERNAME }}
-          DB_ENDPOINT: ${{ secrets.DB_ENDPOINT }}
-          DB_USERNAME: ${{ secrets.DB_USERNAME }}
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-        run: |
-          echo "$SSH_KEY" | tr -d '\r' > /tmp/ssh_key
-          chmod 600 /tmp/ssh_key
-          H=$(printf '%s' "$EC2_HOST"  | tr -d '\r\n ')
-          U=$(printf '%s' "$EC2_USER"  | tr -d '\r\n ')
-          P=$(printf '%s' "$EC2_PROXY" | tr -d '\r\n ')
-          [ -z "$H" ] && echo "ERROR: EC2_HOST vacio" && exit 1
-          [ -z "$P" ] && echo "ERROR: EC2_PROXY vacio" && exit 1
-          [ -z "$U" ] && echo "ERROR: EC2_USER vacio" && exit 1
-          echo "KEY bytes: $(wc -c < /tmp/ssh_key)"
-          ssh -i /tmp/ssh_key -o StrictHostKeyChecking=no -J ${U}@${P} ${U}@${H} "docker pull ${DOCKER_USER}/back-ventas:latest || true; docker stop back-ventas || true; docker rm back-ventas || true; docker run -d --name back-ventas -p 8080:8080 -e DB_ENDPOINT=${DB_ENDPOINT} -e DB_PORT=3306 -e DB_NAME=ventas_db -e DB_USERNAME=${DB_USERNAME} -e DB_PASSWORD=${DB_PASSWORD} ${DOCKER_USER}/back-ventas:latest"
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/back-ventas:latest || true
+            docker stop back-ventas || true
+            docker rm back-ventas || true
+            docker run -d \
+              --name back-ventas \
+              -p 8080:8080 \
+              -e DB_ENDPOINT=${{ secrets.DB_ENDPOINT }} \
+              -e DB_PORT=3306 \
+              -e DB_NAME=ventas_db \
+              -e DB_USERNAME=${{ secrets.DB_USERNAME }} \
+              -e DB_PASSWORD=${{ secrets.DB_PASSWORD }} \
+              ${{ secrets.DOCKERHUB_USERNAME }}/back-ventas:latest

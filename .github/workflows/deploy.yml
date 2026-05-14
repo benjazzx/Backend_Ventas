@@ -26,15 +26,20 @@ jobs:
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/back-ventas:latest
 
+      - name: Preparar clave SSH
+        run: |
+          echo "${{ secrets.EC2_SSH_KEY }}" > /tmp/ssh_key
+          chmod 600 /tmp/ssh_key
+
       - name: Despliegue en EC2
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
+          key_path: /tmp/ssh_key
           proxy_host: ${{ secrets.EC2_PROXY_HOST }}
           proxy_username: ${{ secrets.EC2_USER }}
-          proxy_key: ${{ secrets.EC2_SSH_KEY }}
+          proxy_key_path: /tmp/ssh_key
           script: |
             docker pull ${{ secrets.DOCKERHUB_USERNAME }}/back-ventas:latest
             docker stop back-ventas || true

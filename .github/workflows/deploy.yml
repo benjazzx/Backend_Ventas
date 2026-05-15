@@ -41,6 +41,7 @@ jobs:
             docker rm back-ventas || true
             docker run -d \
               --name back-ventas \
+              --restart unless-stopped \
               -p 8080:8080 \
               -e DB_ENDPOINT=${{ secrets.DB_ENDPOINT }} \
               -e DB_PORT=3306 \

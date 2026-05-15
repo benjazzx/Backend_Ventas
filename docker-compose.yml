@@ -1,0 +1,40 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: mysql-ventas
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${DB_NAME:-ventas_db}
+      MYSQL_USER: ${DB_USERNAME:-innovatech}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-innovatech_password}
+    ports:
+      - "3306:3306"
+    volumes:
+      - ventas_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  back-ventas:
+    build:
+      context: ./Springboot-API-REST
+    container_name: back-ventas
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      DB_ENDPOINT: mysql
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME:-ventas_db}
+      DB_USERNAME: ${DB_USERNAME:-innovatech}
+      DB_PASSWORD: ${DB_PASSWORD:-innovatech_password}
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+volumes:
+  ventas_mysql_data:
+    driver: local

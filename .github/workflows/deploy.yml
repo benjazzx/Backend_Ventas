@@ -1,51 +1,58 @@
-name: CI/CD Pipeline - Back Ventas
-
+name: CI/CD - Back Ventas
 on:
   push:
-    branches:
-      - deploy
+    branches: [deploy]
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: back-ventas
+  ECS_CLUSTER: innovatech-ecs-cluster
+  ECS_SERVICE: back-ventas-svc
 
 jobs:
   build-and-deploy:
+    name: Build, Push y Deploy
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repositorio
+      - name: Checkout código
         uses: actions/checkout@v4
 
-      - name: Login a Docker Hub
-        uses: docker/login-action@v3
+      - name: Configurar AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Build y Push imagen Docker
-        uses: docker/build-push-action@v5
-        with:
-          context: ./Springboot-API-REST
-          push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/back-ventas:latest
+      - name: Login a Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Despliegue en EC2
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          proxy_host: ${{ secrets.EC2_PROXY_HOST }}
-          proxy_username: ${{ secrets.EC2_USER }}
-          proxy_key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/back-ventas:latest || true
-            docker stop back-ventas || true
-            docker rm back-ventas || true
-            docker run -d \
-              --name back-ventas \
-              --restart unless-stopped \
-              -p 8080:8080 \
-              -e DB_ENDPOINT=${{ secrets.DB_ENDPOINT }} \
-              -e DB_PORT=3306 \
-              -e DB_NAME=ventas_db \
-              -e DB_USERNAME=${{ secrets.DB_USERNAME }} \
-              -e DB_PASSWORD=${{ secrets.DB_PASSWORD }} \
-              ${{ secrets.DOCKERHUB_USERNAME }}/back-ventas:latest
+      - name: Build imagen Docker
+        run: |
+          docker build -t ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }} \
+                       -t ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest \
+                       ./Springboot-API-REST
+
+      - name: Push imagen a ECR
+        run: |
+          docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+
+      - name: Deploy a ECS Fargate
+        run: |
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service ${{ env.ECS_SERVICE }} \
+            --force-new-deployment \
+            --region ${{ env.AWS_REGION }}
+          echo "Deploy iniciado correctamente"
+
+      - name: Esperar servicio estable
+        run: |
+          aws ecs wait services-stable \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }} \
+            --region ${{ env.AWS_REGION }}
+          echo "Servicio estable en ECS"

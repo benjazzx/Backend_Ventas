@@ -35,3 +35,6 @@ build/
 
 ### Claude Code ###
 .claude/
+
+### Kubernetes secrets ###
+k8s/secret.yaml

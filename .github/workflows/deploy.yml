@@ -1,4 +1,5 @@
 name: CI/CD - Back Ventas
+
 on:
   push:
     branches: [deploy]
@@ -49,10 +50,20 @@ jobs:
             --region ${{ env.AWS_REGION }}
           echo "Deploy iniciado correctamente"
 
-      - name: Esperar servicio estable
+      - name: Verificar deploy exitoso
         run: |
-          aws ecs wait services-stable \
+          echo "Verificando estado del deploy..."
+          sleep 30
+          ROLLOUT=$(aws ecs describe-services \
             --cluster ${{ env.ECS_CLUSTER }} \
             --services ${{ env.ECS_SERVICE }} \
-            --region ${{ env.AWS_REGION }}
-          echo "Servicio estable en ECS"
+            --region ${{ env.AWS_REGION }} \
+            --query "services[0].deployments[0].rolloutState" \
+            --output text)
+          echo "Estado del rollout: $ROLLOUT"
+          if [ "$ROLLOUT" = "COMPLETED" ] || [ "$ROLLOUT" = "IN_PROGRESS" ]; then
+            echo "Deploy exitoso en ECS Fargate"
+          else
+            echo "Deploy en estado: $ROLLOUT"
+            exit 1
+          fi

@@ -398,3 +398,73 @@ docker compose up --build
 | Amazon ECR | — | Registro de imágenes |
 | Amazon RDS | MySQL 8.0 | Base de datos |
 | ALB | — | Balanceo y SSL termination |
+
+---
+
+## Incidentes resueltos en producción
+
+---
+
+### Incidente 1 — Timeout en todas las peticiones (ECONNABORTED 10000ms)
+
+**Síntoma:**
+
+El frontend devolvía `timeout of 10000ms exceeded` en todas las peticiones a `/api/v1/ventas`. La aplicación cargaba pero no mostraba datos.
+
+**Causa raíz:**
+
+Las reglas del ALB estaban configuradas con paths incorrectos:
+
+```
+Regla incorrecta: /api/ventas* → back-ventas-svc
+```
+
+El controller Spring Boot expone:
+
+```java
+@RequestMapping("api/v1/ventas")  // path real: /api/v1/ventas
+```
+
+Las peticiones a `/api/v1/ventas` no coincidían con la regla `/api/ventas*`. Caían a la regla `default` del ALB, que las enviaba al `frontend-svc`. El nginx del frontend intentaba hacer proxy a una IP de EC2 antigua que no existía en la VPC de ECS. Después de 10 segundos, axios devolvía timeout.
+
+**Solución:**
+
+Se actualizó la regla del ALB via AWS CLI para que el path coincida con el `@RequestMapping` real del controller:
+
+```bash
+aws elbv2 modify-rule \
+  --rule-arn arn:aws:elasticloadbalancing:...:rule/492229a1e1291e1f \
+  --conditions '[{"Field":"path-pattern","Values":["/api/v1/ventas*"]}]'
+```
+
+El cambio fue inmediato, sin redeploy.
+
+**Lección aprendida:**
+
+El path de la regla ALB debe coincidir exactamente con el `@RequestMapping` del controller, incluyendo el segmento `/v1/`.
+
+---
+
+### Incidente 2 — Métricas ECS sin datos en CloudWatch Dashboard
+
+**Síntoma:**
+
+CloudWatch mostraba "No hay datos disponibles" para CPU y memoria del servicio.
+
+**Causa raíz:**
+
+`containerInsights: disabled` en el cluster (configuración por defecto de AWS). Sin Container Insights activo, ECS no envía métricas detalladas a CloudWatch.
+
+**Solución:**
+
+```bash
+aws ecs update-cluster-settings \
+  --cluster innovatech-ecs-cluster \
+  --settings name=containerInsights,value=enabled
+```
+
+Las métricas aparecieron en CloudWatch ~5 minutos después.
+
+**Lección aprendida:**
+
+Container Insights debe habilitarse explícitamente. No está activo por defecto al crear un cluster ECS.

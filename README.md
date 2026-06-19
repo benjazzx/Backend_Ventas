@@ -106,8 +106,10 @@ spring.datasource.username=${DB_USERNAME}
 spring.datasource.password=${DB_PASSWORD}
 spring.jpa.hibernate.ddl-auto=update
 management.endpoints.web.exposure.include=health,info
-management.endpoint.health.show-details=always
+management.endpoint.health.show-details=never
 ```
+
+> **Nota de seguridad:** `show-details` se configuró en `never` (no `always`) para evitar exponer públicamente sin autenticación información sensible del sistema —motor y estado de la base de datos, espacio en disco, rutas internas del filesystem— a través de `/actuator/health`. El ALB solo necesita el código HTTP 200/503 para determinar salud, no el detalle interno. Ver Incidente 3 más abajo para el detalle completo de este hallazgo.
 
 ---
 
@@ -285,15 +287,11 @@ Spring Boot Actuator expone el endpoint de salud utilizado por el ALB para verif
 GET /actuator/health
 ```
 
-Respuesta esperada:
+Respuesta esperada (sin detalle, por configuración de seguridad):
 
 ```json
 {
-  "status": "UP",
-  "components": {
-    "db": { "status": "UP" },
-    "diskSpace": { "status": "UP" }
-  }
+  "status": "UP"
 }
 ```
 
@@ -468,3 +466,47 @@ Las métricas aparecieron en CloudWatch ~5 minutos después.
 **Lección aprendida:**
 
 Container Insights debe habilitarse explícitamente. No está activo por defecto al crear un cluster ECS.
+
+---
+
+### Incidente 3 — Exposición de información sensible en Actuator y Health Check Grace Period insuficiente
+
+**Síntoma:**
+
+El endpoint `/actuator/health` exponía públicamente, sin autenticación, el motor de base de datos, espacio en disco y rutas internas del sistema de archivos. Adicionalmente, tras desplegar la corrección de seguridad junto con un VPC Endpoint de Secrets Manager configurado el mismo día, el servicio quedó con dos deployments concurrentes sin reconciliar: tareas nuevas eran marcadas como `unhealthy` por el ALB segundos antes de completar su arranque, generando un ciclo de reemplazos fallidos.
+
+**Causa raíz:**
+
+Dos problemas independientes coincidieron:
+1. `management.endpoint.health.show-details=always` exponía detalle innecesario del sistema sin autenticación, una superficie de ataque evitable ya que el ALB solo requiere el código HTTP 200/503.
+2. `healthCheckGracePeriodSeconds` del servicio ECS estaba en `0`, mientras Spring Boot tarda 44-47 segundos en completar su arranque. El Target Group evaluaba la salud cada 30 segundos con un umbral de 2 intentos fallidos (~30-45s), una ventana que se solapaba con el arranque real de la aplicación.
+
+**Solución:**
+
+```bash
+# Fix 1: ocultar detalles del Actuator
+# Cambio en application.properties: show-details=always → never
+
+# Fix 2: dar margen de arranque suficiente al health check
+aws ecs update-service \
+  --cluster innovatech-ecs-cluster \
+  --service back-ventas-svc \
+  --health-check-grace-period-seconds 90 \
+  --region us-east-1
+```
+
+**Validación:**
+
+```bash
+curl -sk https://innovatech-alb-516038279.us-east-1.elb.amazonaws.com/actuator/health
+# {"status":"UP"}
+
+curl -sk https://innovatech-alb-516038279.us-east-1.elb.amazonaws.com/api/v1/ventas
+# Respuesta con datos reales desde RDS
+```
+
+**Lección aprendida:**
+
+El grace period debe calibrarse según el tiempo de arranque real de la aplicación, no dejarse en su valor por defecto (0). Frameworks con cold start lento como Spring Boot requieren explícitamente este margen. Además, los endpoints de monitoreo deben exponer solo lo mínimo necesario para su función operativa, sin filtrar detalles internos del sistema.
+
+---
